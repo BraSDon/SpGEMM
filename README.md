@@ -32,6 +32,7 @@ This repository contains two implementations of the Gustavson Sparse Matrix Mult
     ```
 4. Initialize the build directory
     ```sh
+    cd implementation/
     cmake --preset default
     ```
 5. Build the project
