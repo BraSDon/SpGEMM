@@ -9,10 +9,7 @@
 #include <vector>
 #include <chrono>
 
-// -+--+--+--+--+--+--+--+--+--+--+--+- Gustavson Algorithm
-// -+--+--+--+--+--+--+--+--+--+--+--+- //
-//
-//
+// -+--+--+--+--+--+--+--+--+--+--+--+- Parallel Gustavson Algorithm -+--+--+--+--+--+--+--+--+--+--+--+- //
 template <class T, size_t N, size_t NUM_THREADS = 8>
 CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
   if (A.get_cols() != B.get_rows()) {
@@ -108,9 +105,6 @@ CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
   auto& col_idx = C.mut_col_idx();
   auto& row_ptr = C.mut_row_ptr();
 
-  // init timer
-  auto start_time = std::chrono::high_resolution_clock::now();
-
   // compute global C's row_ptr by adding up local row_ptrs
   // NOTE: loop order swapped to avoid repeatedly creating parallel region
   // NOTE: manual loop unrolling did not yield significant performance improvements
@@ -120,13 +114,6 @@ CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
       row_ptr[i] += C_local.row_ptr()[i];
     }
   }
-
-  // end timer
-  auto end_time = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double, std::milli> elapsed = end_time - start_time;
-  std::cout << "Accumulate row_ptr: " << elapsed << std::endl;
-
-  start_time = std::chrono::high_resolution_clock::now();
 
   // copy local C's to global C, row by row.
   #pragma omp parallel for
@@ -150,14 +137,12 @@ CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
                 col_idx.begin() + offset);
     }
   }
-  end_time = std::chrono::high_resolution_clock::now();
-  elapsed = end_time - start_time;
-  // std::cout << "Copy local C's to global C: " << elapsed << std::endl;
 
   assert(C.row_ptr().size() == IA.size());
   return C;
 }
 
+// -+--+--+--+--+--+--+--+--+--+--+--+- Gustavson Algorithm -+--+--+--+--+--+--+--+--+--+--+--+- //
 template <class T, size_t N>
 CSRMatrix<T> gustavson(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
   if (A.get_cols() != B.get_rows()) {
@@ -218,8 +203,7 @@ CSRMatrix<T> gustavson(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
   return C;
 }
 
-// -+--+--+--+--+--+--+--+--+--+--+--+- Join Aggregate Algorithm
-// -+--+--+--+--+--+--+--+--+--+--+--+- //
+// -+--+--+--+--+--+--+--+--+--+--+--+- Join Aggregate Algorithm -+--+--+--+--+--+--+--+--+--+--+--+- //
 template <class Dtype> struct JoinAggregate {
   TripleMatrix<Dtype> operator()(const CSRMatrix<Dtype> &A,
                                  const CSRMatrix<Dtype> &B) const {
