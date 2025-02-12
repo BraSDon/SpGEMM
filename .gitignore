@@ -1,0 +1,9 @@
+data/
+build/
+build-*/
+*/build/*
+.cache/
+*.graph
+*.tags
+*.zip
+*.txt
