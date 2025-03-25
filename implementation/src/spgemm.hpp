@@ -7,10 +7,9 @@
 #include <unordered_map>
 #include <algorithm>
 #include <vector>
-#include <chrono>
 
-// -+--+--+--+--+--+--+--+--+--+--+--+- Parallel Gustavson Algorithm -+--+--+--+--+--+--+--+--+--+--+--+- //
-template <class T, size_t N, size_t NUM_THREADS = 8>
+// -+--+--+--+--+--+--+--+--+--+--+--+- Gustavson Algorithm -+--+--+--+--+--+--+--+--+--+--+--+- //
+template <class T, size_t N, size_t NUM_THREADS = 4>
 CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
   if (A.get_cols() != B.get_rows()) {
     throw std::invalid_argument("Matrix dimensions do not match");
@@ -32,17 +31,26 @@ CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
   const auto &B_val = B.values();
 
   omp_set_num_threads(NUM_THREADS);
-#pragma omp parallel num_threads(NUM_THREADS)
+#pragma omp parallel num_threads(NUM_THREADS) proc_bind(spread)
   {
     size_t tid = static_cast<size_t>(omp_get_thread_num());
     std::vector<size_t> xb(N, SIZE_MAX);
     std::vector<T> x(N);
     CSRMatrix<T> C_local = CSRMatrix<T>(A.get_rows(), B.get_cols());
+    auto &IC = C_local.row_ptr();
+    auto &JC = C_local.col_idx();
     size_t ip = 0;
+    size_t nnz_row = 0;
 
-    // TODO: try different scheduling strategies. maybe template parameter?
-    #pragma omp for
+    // NOTE: 2048 was optimized for the large florida matrices, but for smaller matrices
+    // this is obviously too large. To get a compile time constant, we use N / NUM_THREADS
+    // as a heuristic to determine the chunk size. Optimal would be static scheduling, however
+    // that would make the code quite verbose.
+    constexpr size_t CHUNK_SIZE = (N / NUM_THREADS < 2048) ? (N / NUM_THREADS) : 2048;
+
+    #pragma omp for schedule(monotonic: dynamic, CHUNK_SIZE) nowait
     for (size_t i = 0; i < IA.size() - 1; ++i) {
+      nnz_row = 0;
       size_t start_row_A = IA[i];
       size_t end_row_A = IA[i + 1];
       for (size_t jp = start_row_A; jp < end_row_A; ++jp) {
@@ -55,7 +63,7 @@ CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
           T B_val_kp = B_val[kp];
           if (xb[k] != i) {
             C_local.append_col_idx(k);
-            ++ip;
+            ++nnz_row;
             xb[k] = i;
             x[k] = A_val_jp * B_val_kp;
           } else {
@@ -65,11 +73,10 @@ CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
       }
       // NOTE: instead of setting i-th entry as in sequential version, we set the i+1-th entry
       // because this thread might not be responsible for the next row.
+      ip += nnz_row;
       C_local.set_row_ptr_entry(i + 1, ip);
 
-      const auto &IC = C_local.row_ptr();
-      const auto &JC = C_local.col_idx();
-      for (size_t vp = IC[i]; vp < ip; ++vp) {
+      for (size_t vp = IC[i + 1] - nnz_row; vp < ip; ++vp) {
         size_t v = JC[vp];
         C_local.append_value(x[v]);
       }
@@ -115,26 +122,49 @@ CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
     }
   }
 
+  struct Batch {
+      long int local_start;   // local_row_ptr[start_row]
+      long int local_end;     // local_row_ptr[end_row]
+      long int global_start;  // row_ptr[start_row]
+  };
+
   // copy local C's to global C, row by row.
-  #pragma omp parallel for
+  #pragma omp parallel for schedule(static)
   for (const auto& C_local : local_results) {
     const auto& local_values = C_local.values();
     const auto& local_col_idx = C_local.col_idx();
     const auto& local_row_ptr = C_local.row_ptr();
 
-    for (size_t row = 0; row < A.get_rows(); ++row) {
-      auto start = static_cast<long int>(local_row_ptr[row]);
-      auto end = static_cast<long int>(local_row_ptr[row + 1]);
-      // skip empty rows (might be rows that are not handled by this thread)
-      if (start == end) continue;
-      auto offset = static_cast<long int>(row_ptr[row]);
+    std::vector<Batch> batches;
+    const size_t num_rows = A.get_rows();
+    size_t row = 0;
+    while (row < num_rows) {
+        // skip empty rows
+        if (local_row_ptr[row] == local_row_ptr[row + 1]) {
+            ++row;
+            continue;
+        }
 
-      std::copy(local_values.begin() + start,
-                local_values.begin() + end,
-                values.begin() + offset);
-      std::copy(local_col_idx.begin() + start,
-                local_col_idx.begin() + end,
-                col_idx.begin() + offset);
+        size_t batch_start = row;
+        size_t batch_end = row + 1;
+        // try to extend the batch
+        while (batch_end < num_rows) {
+            if (local_row_ptr[batch_end] == local_row_ptr[batch_end + 1]) break;
+            ++batch_end;
+        }
+        Batch b;
+        b.local_start  = static_cast<long int>(local_row_ptr[batch_start]);
+        b.local_end    = static_cast<long int>(local_row_ptr[batch_end]);
+        b.global_start = static_cast<long int>(row_ptr[batch_start]);
+        batches.push_back(b);
+
+        row = batch_end;
+    }
+
+    for (const auto& b : batches) {
+      const auto batch_nnz = b.local_end - b.local_start;
+      std::copy_n(local_values.begin() + b.local_start, batch_nnz, values.begin() + b.global_start);
+      std::copy_n(local_col_idx.begin() + b.local_start, batch_nnz, col_idx.begin() + b.global_start);
     }
   }
 
@@ -142,7 +172,6 @@ CSRMatrix<T> gustavson_parallel(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
   return C;
 }
 
-// -+--+--+--+--+--+--+--+--+--+--+--+- Gustavson Algorithm -+--+--+--+--+--+--+--+--+--+--+--+- //
 template <class T, size_t N>
 CSRMatrix<T> gustavson(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
   if (A.get_cols() != B.get_rows()) {
@@ -187,6 +216,9 @@ CSRMatrix<T> gustavson(const CSRMatrix<T> &A, const CSRMatrix<T> &B) {
           xb[k] = i;
           x[k] = A_val_jp * B_val_kp;
         } else {
+          // NOTE: this allows for a fused multiply-add (FMA) instruction
+          // If it is actually faster than computing the product before the if-statement
+          // depends on how often the branch is taken.
           x[k] += A_val_jp * B_val_kp;
         }
       }

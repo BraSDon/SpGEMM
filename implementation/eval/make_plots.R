@@ -111,7 +111,7 @@ speedup_plot <- ggplot(speedup_data, aes(
     labels = scales::comma
   ) +
   labs(
-    title = "Speedup of Parallel over Sequenial Gustavson. 8 Threads",
+    title = "Speedup of Parallel over Sequenial Gustavson. 4 Threads",
     color = "Sparsity (%)",
     shape = "Sparsity (%)"
   ) +
@@ -217,6 +217,7 @@ if (nrow(data_bar) > 0) {
     scale_y_continuous("Execution Time (ms)", labels = scales::comma) +
     labs(
       title = "Execution Time Comparison of Florida Sparse Matrices",
+      subtitle = "Parallel version runs 4 threads",
       x = "Matrix",
       fill = "Implementation"
     ) +
@@ -237,6 +238,7 @@ if (nrow(expensive_bar) > 0) {
     scale_y_continuous("Execution Time (ms)", labels = scales::comma) +
     labs(
       title = "Execution Time Comparison of Florida Sparse Matrices",
+      subtitle = "Parallel version runs 4 threads",
       x = "Matrix",
       fill = "Implementation"
     ) +

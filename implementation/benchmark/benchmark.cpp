@@ -5,8 +5,6 @@
 #include "matrix_generator.cpp"
 #include "spgemm.hpp"
 
-// TODO:
-// - Benchmark with a set of representative matrices (e.g. Florida dataset, same as MA)
 template <class T, size_t N>
 void BM_Gustavson_random(benchmark::State &state) {
   const double sparsity = static_cast<double>(state.range(0)) / 100.0;
@@ -42,7 +40,7 @@ void BM_Eigen_random(benchmark::State &state) {
   A.setFromTriplets(triplets.begin(), triplets.end());
 
   for (auto _ : state) {
-    Eigen::SparseMatrix<T> C = A * A;
+    Eigen::SparseMatrix<T, Eigen::RowMajorBit> C = A * A;
     benchmark::ClobberMemory();
   }
 }
@@ -57,7 +55,7 @@ void BM_Gustavson(benchmark::State &state, std::string path) {
   }
 }
 
-template <class T, size_t N, size_t NUM_THREADS = 8>
+template <class T, size_t N, size_t NUM_THREADS = 4>
 void BM_Parallel(benchmark::State &state, std::string path) {
   const auto full_path = "../../data/" + path;
   CSRMatrix<T> matrix = CSRMatrix<T>::from_mm_file(full_path);
@@ -73,7 +71,7 @@ void BM_Eigen(benchmark::State &state, std::string path) {
   CSRMatrix<T> matrix = CSRMatrix<T>::from_mm_file(full_path);
   Eigen::SparseMatrix<T> A = matrix.to_eigen();
   for (auto _ : state) {
-    Eigen::SparseMatrix<T> C = A * A;
+    Eigen::SparseMatrix<T, Eigen::RowMajorBit> C = A * A;
     benchmark::ClobberMemory();
   }
 }
@@ -177,7 +175,7 @@ void BM_Eigen_ASIC_680ks(benchmark::State &state) {
   BM_Eigen<double, 682712>(state, "ASIC_680ks/ASIC_680ks.mtx");
 }
 
-auto repeats = 4;
+auto repeats = 5;
 
 BENCHMARK(BM_Gustavson_Nemeth)->Repetitions(repeats)->ReportAggregatesOnly(true);
 BENCHMARK(BM_Parallel_Nemeth)->Repetitions(repeats)->ReportAggregatesOnly(true);

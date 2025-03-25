@@ -7,9 +7,6 @@
 
 #include "common.h"
 
-// TODO: turns out, csr is also known as adjacency array. So check if we already
-// made optimizations for it in ex2/3
-
 template <class T> class CSRMatrix {
 private:
   size_t rows_, cols_;
@@ -20,14 +17,18 @@ private:
   std::vector<size_t> row_ptr_;
 
 public:
-  using DenseMatrix = std::vector<std::vector<T>>;
   // -+--+--+--+--+--+--+--+--+--+--+- Constructors -+--+--+--+--+--+--+--+--+--+--+--+- //
   CSRMatrix (const CSRMatrix&) = delete;
-  CSRMatrix& operator= (const CSRMatrix&) = delete;
+  CSRMatrix(CSRMatrix &&other) noexcept
+      : rows_(other.rows_), cols_(other.cols_),
+        values_(std::move(other.values_)), col_idx_(std::move(other.col_idx_)),
+        row_ptr_(std::move(other.row_ptr_)) {}
 
+  // Default constructor
   CSRMatrix() noexcept : rows_(0), cols_(0) { row_ptr_.push_back(0); }
 
   // TODO: add heuristic for reservering memory (typically done via density estimation)
+  // but that is out of scope.
   CSRMatrix(size_t rows, size_t cols) noexcept : rows_(rows), cols_(cols) {
     row_ptr_.resize(rows + 1, 0);
   }
@@ -38,14 +39,8 @@ public:
     row_ptr_.resize(rows + 1, 0);
   }
 
-  // move constructor
-  CSRMatrix(CSRMatrix &&other) noexcept
-      : rows_(other.rows_), cols_(other.cols_),
-        values_(std::move(other.values_)), col_idx_(std::move(other.col_idx_)),
-        row_ptr_(std::move(other.row_ptr_)) {}
-
   // From dense matrix
-  explicit CSRMatrix(const DenseMatrix &matrix) noexcept {
+  explicit CSRMatrix(const DenseMatrix<T> &matrix) noexcept {
     // Handle edge case: empty matrix
     if (matrix.empty() || matrix[0].empty()) {
       rows_ = cols_ = 0;
@@ -60,7 +55,6 @@ public:
     // Build CSR structure
     for (size_t row = 0; row < rows_; ++row) {
       for (size_t col = 0; col < cols_; ++col) {
-        // TODO: Handle floating point comparison
         if (matrix[row][col] != static_cast<T>(0)) {
           values_.push_back(matrix[row][col]);
           col_idx_.push_back(col);
@@ -70,7 +64,7 @@ public:
     }
   }
 
-  // Triple (i, j, value) constructor
+  // From triple (i, j, value) constructor
   explicit CSRMatrix(const TripleMatrix<T> &triples, size_t rows,
                      size_t cols) noexcept {
     this->rows_ = rows;
@@ -100,9 +94,9 @@ public:
       row_ptr_[row + 1] += row_ptr_[row];
     }
   }
-  // -+--+--+--+--+--+--+--+--+--+--+--+- Helper functions -+--+--+--+--+--+--+--+--+--+--+--+- //
-  DenseMatrix to_dense() const {
-    DenseMatrix dense = DenseMatrix(rows_, std::vector<T>(cols_, 0));
+  // -+--+--+--+--+--+--+--+--+--+--+--+- Conversion functions -+--+--+--+--+--+--+--+--+--+--+--+- //
+  DenseMatrix<T> to_dense() const {
+    DenseMatrix<T> dense = DenseMatrix(rows_, std::vector<T>(cols_, 0));
     for (size_t row = 0; row < rows_; ++row) {
       for (size_t idx = row_ptr_[row]; idx < row_ptr_[row + 1]; ++idx) {
         dense[row][col_idx_[idx]] = values_[idx];
@@ -323,8 +317,7 @@ public:
     return CSRMatrix<T>(matrix, rows, cols);
   }
   // -+--+--+--+--+--+--+--+--+--+--+- Operators -+--+--+--+--+--+--+--+--+--+--+--+- // 
-
-  // Move assignment operator
+  CSRMatrix& operator= (const CSRMatrix&) = delete;
   CSRMatrix<T> &operator=(CSRMatrix<T> &&other) noexcept {
     if (this != &other) {
       rows_ = other.rows_;
@@ -336,7 +329,6 @@ public:
     return *this;
   }
 
-  // Stream insertion operator
   friend std::ostream &operator<<(std::ostream &os,
                                   const CSRMatrix<T> &matrix) {
     os << "CSRMatrix (" << matrix.get_rows() << " x " << matrix.get_cols()
@@ -365,24 +357,20 @@ public:
       return false;
     }
 
-    // Check values (handle floating-point comparisons)
     if constexpr (std::is_floating_point<T>::value) {
-      const double epsilon = 1e-9; // Tolerance for floating-point comparison
+      const double epsilon = 1e-9;
       for (size_t i = 0; i < values_.size(); ++i) {
         if (std::abs(values_[i] - other.values_[i]) > epsilon) {
           return false;
         }
       }
     } else {
-      // Direct comparison for integral types
       if (values_ != other.values_) {
         return false;
       }
     }
     return true;
   }
-
-  // Inequality operator (delegates to equality operator)
   bool operator!=(const CSRMatrix<T> &other) const { return !(*this == other); }
 
   // -+--+--+--+--+--+--+--+--+--+--+- Getters -+--+--+--+--+--+--+--+--+--+--+--+- //

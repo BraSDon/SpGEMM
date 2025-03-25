@@ -1,3 +1,4 @@
+#include <Eigen/src/Core/products/Parallelizer.h>
 #include <gtest/gtest.h>
 #include <Eigen/Sparse>
 #include <vector>
@@ -6,9 +7,6 @@
 #include "spgemm.hpp"
 #include "matrix_generator.cpp"
 #include "csr.hpp"
-
-// TODO: 
-// - test for numerical issues with floats/doubles
 
 // Base test fixture for parameterized SpGEMM tests
 template <typename Dtype>
@@ -43,7 +41,6 @@ TYPED_TEST_P(SpGEMM, EdgeCases) {
 TYPED_TEST_P(SpGEMM, GeneralMatrix) {
     using Dtype = TypeParam;
 
-    // diagonal with 2s
     DenseMatrix<Dtype> dense = {
         {2, 0, 0, 0},
         {0, 2, 0, 0},
@@ -85,6 +82,8 @@ TYPED_TEST_P(SpGEMM, RandomMatrices) {
         A_eigen.setFromTriplets(triplets.begin(), triplets.end());
         Eigen::SparseMatrix<Dtype> C_eigen = A_eigen * A_eigen;
 
+        EXPECT_EQ(Eigen::nbThreads(), 1);
+
         for (size_t i = 0; i < 4; ++i) {
             for (size_t j = 0; j < 4; ++j) {
                 const auto i_li = static_cast<long int>(i);
@@ -115,7 +114,6 @@ TYPED_TEST_P(SpGEMM, ParallelEdgeCases) {
     auto C_single = gustavson_parallel<Dtype, 1>(A_single, B_single).to_triple();
     EXPECT_EQ(C_single.size(), 1);
 
-    // extract value from C_single, which is vector<tuple<int, int, Dtype>>
     auto [i, j, value] = C_single[0];
     if constexpr (std::is_floating_point<Dtype>::value) {
         EXPECT_NEAR(value, static_cast<Dtype>(2), 1e-6);
@@ -128,7 +126,6 @@ TYPED_TEST_P(SpGEMM, ParallelEdgeCases) {
 TYPED_TEST_P(SpGEMM, ParallelGeneralMatrix) {
     using Dtype = TypeParam;
 
-    // diagonal with 2s
     DenseMatrix<Dtype> dense = {
         {2, 0, 0, 0},
         {0, 2, 0, 0},
@@ -181,6 +178,9 @@ TYPED_TEST_P(SpGEMM, ParallelRandomMatrices) {
         auto triplets = to_eigen_triplets(matrix);
         A_eigen.setFromTriplets(triplets.begin(), triplets.end());
         Eigen::SparseMatrix<Dtype> C_eigen = A_eigen * A_eigen;
+
+        EXPECT_EQ(C.size(), dim);
+        EXPECT_EQ(C[0].size(), dim);
 
         for (size_t i = 0; i < dim; ++i) {
                 for (size_t j = 0; j < dim; ++j) {
