@@ -1,0 +1,11 @@
+[workspace]
+authors = ["Brandon Schühlein <brandon@schuehlein.eu>"]
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+name = "spgemm-mojo"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+mojo = ">=0.26.1.0.dev2026010305,<0.27"
